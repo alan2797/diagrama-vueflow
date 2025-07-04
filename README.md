@@ -7,8 +7,8 @@ Aplicación para creación de diagramas de flujo desarrollada con:
 ---
 
 🌐 Demo Online
-Prueba la demo oficial de VueFlow:
-👉 https://vueflow.dev/
+Prueba la demo subida en vercel:
+👉 https://diagrama-vueflow.vercel.app/#/
 
 ## Install the dependencies
 
