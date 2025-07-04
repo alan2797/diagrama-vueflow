@@ -24,6 +24,7 @@
           v-model="mostrarDrawerEditarSimple"
           :paso-data="{ label: selectedNode?.data?.label || '' }"
           @submit="handleSubmit"
+          @delete="deleteNodoSimple"
         />
         <DrawerEditarBranch
           v-model="mostrarDrawerEditarBranch"
@@ -33,6 +34,7 @@
             labelHijo2: selectedNodeHijo2?.data?.label || '',
           }"
           @submit="handleSubmitBranch"
+          @delete="deleteNodoBranch"
         />
       </q-page>
     </q-page-container>
@@ -117,6 +119,186 @@ const handleSubmit = (data: { label: string }) => {
     selectedNode.value.data.label = data.label;
   }
 };
+
+const deleteNodoSimple = () => {
+  if (!selectedNode.value) {
+    console.warn('No hay nodo seleccionado');
+    return;
+  }
+
+  const nodeId = selectedNode.value.id;
+
+  // Edge de entrada (source -> selectedNode)
+  const incomingEdge = elements.value.find(
+    (el): el is Edge => 'target' in el && el.target === nodeId,
+  );
+
+  // Hasta 2 edges de salida (selectedNode -> target)
+  const outgoingEdges = elements.value
+    .filter((el): el is Edge => 'source' in el && el.source === nodeId)
+    .slice(0, 2);
+
+  console.log('Nodo seleccionado:', selectedNode.value);
+  console.log('Edge de entrada:', incomingEdge);
+  console.log('Edges de salida:', outgoingEdges);
+  if (!incomingEdge || !outgoingEdges || outgoingEdges.length == 0) {
+    console.warn('No se encontraron conexiones suficientes para eliminar y reconectar');
+    return;
+  }
+
+  // Crear nuevo edge conectando el source original con el target del primer hijo
+  const newEdge: Edge = {
+    id: `edge-${incomingEdge.source}-${outgoingEdges[0]?.target}`,
+    source: incomingEdge.source,
+    target: outgoingEdges[0]?.target ?? '',
+    type: 'add', // o el tipo que uses
+  };
+  // Mover los nodos hijos 130px hacia arriba
+  // Obtener todos los descendientes del nodo eliminado
+  const todosLosDescendientes = obtenerTodosLosDescendientes(
+    nodeId,
+    elements.value.filter((el): el is Edge => 'source' in el && 'target' in el),
+  );
+  // Filtrar todos los elementos que NO son el nodo ni los edges que queremos eliminar
+  elements.value = elements.value.filter((el) => {
+    if ('id' in el) {
+      const isNodoEliminado = el.id === nodeId;
+      const isEdgeEliminado =
+        el.id === incomingEdge.id || outgoingEdges.some((e) => e.id === el.id);
+      return !isNodoEliminado && !isEdgeEliminado;
+    }
+    return true;
+  });
+
+  // Agregar el nuevo edge
+  elements.value.push(newEdge);
+
+  console.log(todosLosDescendientes);
+  // Moverlos hacia arriba
+  todosLosDescendientes.forEach((descendantId) => {
+    const node = elements.value.find(
+      (el): el is Node => el.id === descendantId && 'position' in el,
+    );
+    if (node) {
+      node.position.y -= 130;
+    }
+  });
+};
+
+const deleteNodoBranch = () => {
+  const nodo = selectedNode.value;
+  if (!nodo) {
+    console.warn('No hay nodo seleccionado');
+    return;
+  }
+
+  // Verifica si es tipo "branch"
+  const tipoNodo = 'type' in nodo ? nodo.type : nodo.data?.type;
+  if (tipoNodo !== 'branch') {
+    console.warn('El nodo seleccionado no es de tipo "branch"');
+    return;
+  }
+
+  const nodeId = nodo.id;
+  // Edge de entrada (source -> selectedNode)
+  const incomingEdge = elements.value.find(
+    (el): el is Edge => 'target' in el && el.target === nodeId,
+  );
+
+  // Hasta 2 edges de salida (selectedNode -> target)
+  const outgoingEdges = elements.value
+    .filter((el): el is Edge => 'source' in el && el.source === nodeId)
+    .slice(0, 2);
+
+  console.log('Nodo seleccionado:', selectedNode.value);
+  console.log('Edge de entrada:', incomingEdge);
+  console.log('Edges de salida:', outgoingEdges);
+  if (!incomingEdge || !outgoingEdges || outgoingEdges.length == 0) {
+    console.warn('No se encontraron conexiones suficientes para eliminar y reconectar');
+    return;
+  }
+  const sourceId = incomingEdge.source;
+  // Buscar nodos source y target
+  const sourceNode = elements.value.find((el): el is Node => el.id === sourceId);
+  const sourceNodeStart = elements.value.find((el) => el.id === sourceId) as Node;
+  const withNodoSource = getNodeVisualWidth(sourceNodeStart);
+  const anchoNodo = 60;
+  const positionX = sourceNodeStart.position.x + withNodoSource / 2 - anchoNodo / 2;
+
+  // Obtener todos los nodos descendientes desde este nodo
+  const descendientes = obtenerTodosLosDescendientes(nodeId, elements.value);
+  descendientes.add(nodeId); // incluir el nodo branch en los que vamos a eliminar
+
+  // Eliminar nodos y edges conectados a ellos
+  elements.value = elements.value.filter((el) => {
+    if ('id' in el) {
+      const isNodo = 'position' in el;
+      const isEdge = 'source' in el && 'target' in el;
+
+      if (isNodo) {
+        return !descendientes.has(el.id);
+      }
+
+      if (isEdge) {
+        return !descendientes.has((el as Edge).source) && !descendientes.has((el as Edge).target);
+      }
+    }
+    return true;
+  });
+
+  // 4. Crear nuevo nodo
+  const nuevoNodoId = `nodo-${Date.now()}`;
+
+  const nuevoNodo: Node = {
+    id: nuevoNodoId,
+    type: 'end', // o el tipo que uses
+    position: {
+      x: positionX ?? 0,
+      y: (sourceNode?.position.y ?? 0) + 140, // debajo del source
+    },
+    data: {
+      label: 'Fin',
+    },
+    style: {
+      width: '60px',
+    },
+  };
+
+  // 5. Crear nuevo edge
+  const nuevoEdge: Edge = {
+    id: `edge-${sourceId}-${nuevoNodoId}`,
+    source: sourceId,
+    target: nuevoNodoId,
+    type: 'add',
+    label: '',
+  };
+
+  // 6. Agregar a elementos
+  elements.value.push(nuevoNodo);
+  elements.value.push(nuevoEdge);
+  console.log('Nodo branch y sus descendientes eliminados:', [...descendientes]);
+};
+
+function obtenerTodosLosDescendientes(nodoId: string, elementos: FlowElement[]): Set<string> {
+  const descendientes = new Set<string>();
+  const queue = [nodoId];
+
+  const edges = elementos.filter((el): el is Edge => 'source' in el && 'target' in el);
+
+  while (queue.length > 0) {
+    const actualId = queue.shift()!;
+    const hijos = edges.filter((e) => e.source === actualId).map((e) => e.target);
+
+    hijos.forEach((hijoId) => {
+      if (!descendientes.has(hijoId)) {
+        descendientes.add(hijoId);
+        queue.push(hijoId);
+      }
+    });
+  }
+
+  return descendientes;
+}
 
 const handleSubmitBranch = (data: { label: string; labelHijo1: string; labelHijo2: string }) => {
   if (!selectedNode.value) {
